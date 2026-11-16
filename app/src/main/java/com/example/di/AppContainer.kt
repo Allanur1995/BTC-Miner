@@ -1,6 +1,9 @@
 package com.example.di
 
 import android.content.Context
+import com.example.audio.SoundController
+import com.example.audio.SoundManager
+import com.example.data.GamePreferences
 import com.example.data.local.AppDatabase
 import com.example.data.local.GameStateDao
 import com.example.data.repository.GameRepository
@@ -13,8 +16,10 @@ interface AppContainer {
     val gameStateDao: GameStateDao
     val userStatsDao: com.example.data.local.UserStatsDao
     val dailyCheckInDao: com.example.data.local.DailyCheckInDao
+    val dailyProductivityDao: com.example.data.local.DailyProductivityDao
     val gameRepository: GameRepository
     val dailyBonusRepository: com.example.data.repository.DailyBonusRepository
+    val soundManager: SoundController
 }
 
 /**
@@ -38,11 +43,22 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
         DatabaseModule.provideDailyCheckInDao(database)
     }
 
+    override val dailyProductivityDao: com.example.data.local.DailyProductivityDao by lazy {
+        DatabaseModule.provideDailyProductivityDao(database)
+    }
+
     override val gameRepository: GameRepository by lazy {
-        GameRepository(gameStateDao, userStatsDao)
+        GameRepository(gameStateDao, userStatsDao, dailyProductivityDao)
     }
 
     override val dailyBonusRepository: com.example.data.repository.DailyBonusRepository by lazy {
         DatabaseModule.provideDailyBonusRepository(context)
+    }
+
+    override val soundManager: SoundController by lazy {
+        SoundManager(
+            context = context,
+            initialEnabled = GamePreferences(context).soundEnabled
+        )
     }
 }

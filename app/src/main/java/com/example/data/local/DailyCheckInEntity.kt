@@ -23,5 +23,14 @@ data class DailyCheckInEntity(
     val highestStreak: Int = 1,
 
     @ColumnInfo(name = "total_claims_count")
-    val totalClaimsCount: Int = 0
+    val totalClaimsCount: Int = 0,
+
+    @ColumnInfo(name = "last_awarded_sats")
+    val lastAwardedSats: Long = 0L,
+
+    @ColumnInfo(name = "last_awarded_gems")
+    val lastAwardedGems: Int = 0,
+
+    @ColumnInfo(name = "last_awarded_diamonds")
+    val lastAwardedDiamonds: Int = 0
 )

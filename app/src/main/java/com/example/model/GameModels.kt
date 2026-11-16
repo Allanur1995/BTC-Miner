@@ -46,7 +46,19 @@ data class DailyBonusDay(
     val gemReward: Int,
     val diamondReward: Int,
     val isClaimed: Boolean = false,
-    val isCurrent: Boolean = false
+    val isCurrent: Boolean = false,
+    val maxSatsReward: Long = satsReward,
+    val maxGemReward: Int = gemReward,
+    val maxDiamondReward: Int = diamondReward
+)
+
+data class DailyBonusAwardEvent(
+    val streakDay: Int,
+    val awardedSats: Long,
+    val awardedBtc: Double,
+    val awardedGems: Int,
+    val awardedDiamonds: Int,
+    val timestamp: Long = System.currentTimeMillis()
 )
 
 data class GameTask(
@@ -77,4 +89,13 @@ data class TapParticle(
     val y: Float,
     val text: String,
     val createdAt: Long = System.currentTimeMillis()
+)
+
+data class DailyProductivityPoint(
+    val dateKey: String,
+    val dayLabel: String,
+    val satsMined: Double,
+    val tapsCount: Int,
+    val peakHashRateGh: Double,
+    val isToday: Boolean = false
 )

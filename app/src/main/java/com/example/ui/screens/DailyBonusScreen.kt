@@ -116,7 +116,7 @@ fun DailyBonusScreen(
             IconButton(
                 onClick = onBack,
                 modifier = Modifier
-                    .size(36.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
                     .background(Color(0xFF263238))
                     .testTag("bonus_back_btn")
@@ -130,13 +130,13 @@ fun DailyBonusScreen(
             Spacer(modifier = Modifier.width(10.dp))
             Column {
                 Text(
-                    text = "📅 7-Day Miner Login Streak",
+                    text = "📅 Daily Random Crypto Bonus",
                     color = GoldLight,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Black
                 )
                 Text(
-                    text = "Check in every day to claim massive satoshis and rare diamonds!",
+                    text = "Auto-awards random Sats & Gems once every 24h when you open the app!",
                     color = Color.LightGray,
                     fontSize = 11.sp
                 )
@@ -190,7 +190,6 @@ fun DailyBonusScreen(
             ) {
                 Button(
                     onClick = {
-                        dailyBonusViewModel.claimTodayBonus()
                         onClaimBonus(bonusUiState.currentStreakDay)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary),
@@ -202,9 +201,9 @@ fun DailyBonusScreen(
                         .testTag("claim_daily_btn")
                 ) {
                     Text(
-                        text = "🎁 CLAIM DAY ${bonusUiState.currentStreakDay} BONUS!",
+                        text = "🎁 CLAIM DAY ${bonusUiState.currentStreakDay} RANDOM CRYPTO!",
                         color = Color.Black,
-                        fontSize = 16.sp,
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.Black
                     )
                 }
@@ -216,17 +215,29 @@ fun DailyBonusScreen(
                     .padding(horizontal = 14.dp, vertical = 8.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(Color(0xFF1B2234))
+                    .border(1.dp, GreenHashRate.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
                     .padding(12.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = "✅ Today's login reward claimed!",
+                        text = "✅ Today's random crypto bonus awarded!",
                         color = GreenHashRate,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center
                     )
+                    if (bonusUiState.lastAwardedSats > 0L) {
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = "🎁 +${bonusUiState.lastAwardedSats} Sats • +${bonusUiState.lastAwardedGems} Gems" +
+                                if (bonusUiState.lastAwardedDiamonds > 0) " • +${bonusUiState.lastAwardedDiamonds} Diamonds" else "",
+                            color = GoldPrimary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Black,
+                            textAlign = TextAlign.Center
+                        )
+                    }
                     Spacer(modifier = Modifier.height(3.dp))
                     Text(
                         text = "⏳ ${bonusUiState.remainingTimeText}",

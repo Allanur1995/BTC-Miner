@@ -9,13 +9,20 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ads.AdMobManager
 import com.example.ads.findActivity
+import com.example.data.auth.GoogleAuthManager
+import com.example.ui.components.DailyBonusAwardedDialog
 import com.example.ui.screens.DailyBonusScreen
+import com.example.ui.screens.LeaderboardScreen
 import com.example.ui.screens.MineScreen
 import com.example.ui.screens.MinersScreen
 import com.example.ui.screens.ShopScreen
@@ -25,6 +32,7 @@ import com.example.ui.theme.CaveDarkBg
 import com.example.ui.theme.MyApplicationTheme
 import com.example.viewmodel.CurrentScreen
 import com.example.viewmodel.GameViewModel
+import androidx.compose.runtime.remember
 
 class MainActivity : ComponentActivity() {
     private val viewModel: GameViewModel by viewModels { GameViewModel.Factory }
@@ -49,7 +57,21 @@ class MainActivity : ComponentActivity() {
 fun CryptoMinerApp(viewModel: GameViewModel) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val authManager = remember(context) { GoogleAuthManager(context) }
     val activity = context.findActivity()
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.checkAndAwardDailyBonusOnOpen()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     val navigateToTab: (CurrentScreen) -> Unit = { target ->
         if (target == CurrentScreen.WALLET || target == CurrentScreen.SHOP) {
@@ -59,8 +81,14 @@ fun CryptoMinerApp(viewModel: GameViewModel) {
     }
 
     // Handle Android system back gesture to navigate back to MINE screen or close dialog
-    BackHandler(enabled = uiState.activeDialog != null || uiState.currentScreen != CurrentScreen.MINE) {
-        if (uiState.activeDialog != null) {
+    BackHandler(
+        enabled = uiState.dailyBonusAwardPopup != null ||
+            uiState.activeDialog != null ||
+            uiState.currentScreen != CurrentScreen.MINE
+    ) {
+        if (uiState.dailyBonusAwardPopup != null) {
+            viewModel.dismissDailyBonusPopup()
+        } else if (uiState.activeDialog != null) {
             viewModel.closeDialog()
         } else if (uiState.currentScreen != CurrentScreen.MINE) {
             viewModel.switchScreen(CurrentScreen.MINE)
@@ -149,5 +177,20 @@ fun CryptoMinerApp(viewModel: GameViewModel) {
                 onBack = { viewModel.switchScreen(CurrentScreen.MINE) }
             )
         }
+        CurrentScreen.LEADERBOARD -> {
+            LeaderboardScreen(
+                gameUiState = uiState,
+                authManager = authManager,
+                onTabSelected = navigateToTab,
+                onBack = { viewModel.switchScreen(CurrentScreen.MINE) }
+            )
+        }
+    }
+
+    uiState.dailyBonusAwardPopup?.let { awardEvent ->
+        DailyBonusAwardedDialog(
+            event = awardEvent,
+            onDismiss = { viewModel.dismissDailyBonusPopup() }
+        )
     }
 }

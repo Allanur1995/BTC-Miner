@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.model.WalletTransaction
 import com.example.ui.components.GameBottomNav
+import com.example.ui.components.MiningProductivityChart
 import com.example.ui.components.TopBalanceBar
 import com.example.ui.theme.CaveCardBg
 import com.example.ui.theme.CaveDarkBg
@@ -114,7 +115,7 @@ fun WalletScreen(
             IconButton(
                 onClick = onBack,
                 modifier = Modifier
-                    .size(36.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
                     .background(Color(0xFF263238))
                     .testTag("wallet_back_btn")
@@ -319,6 +320,13 @@ fun WalletScreen(
                         }
                     }
                 }
+            }
+
+            // 7-Day Mining Productivity Trends Chart
+            item {
+                MiningProductivityChart(
+                    points = uiState.productivity7Days
+                )
             }
 
             // Recent Transactions

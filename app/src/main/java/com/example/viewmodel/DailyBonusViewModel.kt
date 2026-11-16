@@ -28,6 +28,9 @@ data class DailyBonusUiState(
     val remainingTimeText: String = "Ready to Claim!",
     val remainingMillis: Long = 0L,
     val lastClaimTimestamp: Long = 0L,
+    val lastAwardedSats: Long = 0L,
+    val lastAwardedGems: Int = 0,
+    val lastAwardedDiamonds: Int = 0,
     val statusBanner: String? = null,
     val isClaimSuccess: Boolean = false
 )
@@ -49,28 +52,55 @@ class DailyBonusViewModel(
     private fun observeCheckInData() {
         viewModelScope.launch(Dispatchers.IO) {
             val initial = repository.getOrInitCheckIn()
-            updateUiFromEntity(initial.currentStreakDay, initial.lastClaimTimestamp)
+            updateUiFromEntity(
+                streakDay = initial.currentStreakDay,
+                lastClaimTimestamp = initial.lastClaimTimestamp,
+                lastAwardedSats = initial.lastAwardedSats,
+                lastAwardedGems = initial.lastAwardedGems,
+                lastAwardedDiamonds = initial.lastAwardedDiamonds
+            )
 
             repository.checkInFlow.collect { checkIn ->
                 if (checkIn != null) {
-                    updateUiFromEntity(checkIn.currentStreakDay, checkIn.lastClaimTimestamp)
+                    updateUiFromEntity(
+                        streakDay = checkIn.currentStreakDay,
+                        lastClaimTimestamp = checkIn.lastClaimTimestamp,
+                        lastAwardedSats = checkIn.lastAwardedSats,
+                        lastAwardedGems = checkIn.lastAwardedGems,
+                        lastAwardedDiamonds = checkIn.lastAwardedDiamonds
+                    )
                 }
             }
         }
     }
 
-    private fun updateUiFromEntity(streakDay: Int, lastClaimTimestamp: Long) {
+    private fun updateUiFromEntity(
+        streakDay: Int,
+        lastClaimTimestamp: Long,
+        lastAwardedSats: Long,
+        lastAwardedGems: Int,
+        lastAwardedDiamonds: Int
+    ) {
         val now = System.currentTimeMillis()
         val canClaim = repository.canClaim(lastClaimTimestamp, now)
         val remaining = repository.getRemainingMillis(lastClaimTimestamp, now)
 
+        val claimedTargetDay = if (streakDay <= 1) 7 else streakDay - 1
         val updatedDays = DailyBonusRepository.REWARD_SCHEDULE.map { scheduleDay ->
             val isClaimed = if (canClaim) {
                 scheduleDay.day < streakDay
             } else {
-                scheduleDay.day <= streakDay
+                if (streakDay == 1 && lastClaimTimestamp > 0L) {
+                    true // Full 7-day cycle completed today
+                } else {
+                    scheduleDay.day <= claimedTargetDay
+                }
             }
-            val isCurrent = scheduleDay.day == streakDay
+            val isCurrent = if (canClaim) {
+                scheduleDay.day == streakDay
+            } else {
+                scheduleDay.day == claimedTargetDay
+            }
 
             scheduleDay.copy(
                 isClaimed = isClaimed,
@@ -85,7 +115,10 @@ class DailyBonusViewModel(
                 canClaimToday = canClaim,
                 remainingMillis = remaining,
                 remainingTimeText = formatRemainingTime(remaining),
-                lastClaimTimestamp = lastClaimTimestamp
+                lastClaimTimestamp = lastClaimTimestamp,
+                lastAwardedSats = lastAwardedSats,
+                lastAwardedGems = lastAwardedGems,
+                lastAwardedDiamonds = lastAwardedDiamonds
             )
         }
     }

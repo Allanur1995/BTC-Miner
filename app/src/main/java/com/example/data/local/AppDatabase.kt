@@ -10,15 +10,17 @@ import androidx.room.RoomDatabase
         UserStats::class,
         UserGameStateEntity::class,
         MinerEntity::class,
-        DailyCheckInEntity::class
+        DailyCheckInEntity::class,
+        DailyProductivityEntity::class
     ],
-    version = 3,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun gameStateDao(): GameStateDao
     abstract fun userStatsDao(): UserStatsDao
     abstract fun dailyCheckInDao(): DailyCheckInDao
+    abstract fun dailyProductivityDao(): DailyProductivityDao
 
     companion object {
         @Volatile

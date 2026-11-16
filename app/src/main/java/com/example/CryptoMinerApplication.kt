@@ -13,6 +13,8 @@ class CryptoMinerApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         appContainer = DefaultAppContainer(this)
+        // Eagerly preload sound effects on background IO thread for zero-latency clicks
+        appContainer.soundManager
         AdMobManager.initialize(this)
     }
 }

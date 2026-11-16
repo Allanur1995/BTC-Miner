@@ -12,13 +12,20 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.lifecycle.viewModelScope
 import com.example.CryptoMinerApplication
+import com.example.audio.SoundController
+import com.example.audio.SoundManager
 import com.example.di.DatabaseModule
 import com.example.data.GamePreferences
 import com.example.data.local.AppDatabase
+import com.example.data.local.DailyProductivityEntity
 import com.example.data.local.MinerEntity
 import com.example.data.local.UserGameStateEntity
+import com.example.data.repository.ClaimResult
+import com.example.data.repository.DailyBonusRepository
 import com.example.data.repository.GameRepository
+import com.example.model.DailyBonusAwardEvent
 import com.example.model.DailyBonusDay
+import com.example.model.DailyProductivityPoint
 import com.example.model.GameTask
 import com.example.model.Miner
 import com.example.model.ShopCategory
@@ -32,6 +39,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -43,7 +52,8 @@ enum class CurrentScreen {
     BONUS,
     WALLET,
     TASKS,
-    MINERS
+    MINERS,
+    LEADERBOARD
 }
 
 data class GameUiState(
@@ -74,7 +84,9 @@ data class GameUiState(
     val blockNumber: Long = 842915L,
     val tapCombo: Int = 0,
     val comboMultiplier: Float = 1.0f,
-    val adsWatchedCount: Int = 0
+    val adsWatchedCount: Int = 0,
+    val dailyBonusAwardPopup: DailyBonusAwardEvent? = null,
+    val productivity7Days: List<DailyProductivityPoint> = emptyList()
 )
 
 enum class GameDialogType {
@@ -125,12 +137,24 @@ fun MinerEntity.toModel(): Miner = Miner(
 class GameViewModel(
     application: Application,
     private val repository: GameRepository = (application as? CryptoMinerApplication)?.appContainer?.gameRepository
-        ?: DatabaseModule.provideGameRepository(application)
+        ?: DatabaseModule.provideGameRepository(application),
+    private val dailyBonusRepository: DailyBonusRepository = (application as? CryptoMinerApplication)?.appContainer?.dailyBonusRepository
+        ?: DatabaseModule.provideDailyBonusRepository(application),
+    private val soundController: SoundController = (application as? CryptoMinerApplication)?.appContainer?.soundManager
+        ?: SoundManager(application, GamePreferences(application).soundEnabled)
 ) : AndroidViewModel(application) {
     private val prefs = GamePreferences(application)
 
     private val _uiState = MutableStateFlow(GameUiState())
     val uiState: StateFlow<GameUiState> = _uiState.asStateFlow()
+
+    @Volatile
+    private var isInitialStateLoaded = false
+    private val dailyBonusMutex = Mutex()
+    private val productivityLock = Any()
+    private var cachedProductivityRecords: List<DailyProductivityEntity> = emptyList()
+    private var pendingProductivitySats: Double = 0.0
+    private var pendingProductivityTaps: Int = 0
 
     private val vibrator: Vibrator? by lazy {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -143,7 +167,10 @@ class GameViewModel(
     }
 
     init {
+        soundController.setEnabled(prefs.soundEnabled)
         loadInitialState()
+        observeDailyBonusSync()
+        observeProductivitySync()
         startGameLoop()
     }
 
@@ -355,15 +382,7 @@ class GameViewModel(
             )
         )
 
-        val defaultDailyBonuses = listOf(
-            DailyBonusDay(1, "50 Sats", satsReward = 50, gemReward = 5, diamondReward = 0, isClaimed = true, isCurrent = false),
-            DailyBonusDay(2, "100 Sats + 10 Gems", satsReward = 100, gemReward = 10, diamondReward = 0, isClaimed = false, isCurrent = true),
-            DailyBonusDay(3, "250 Sats + 15 Gems", satsReward = 250, gemReward = 15, diamondReward = 1, isClaimed = false),
-            DailyBonusDay(4, "500 Sats + 20 Gems", satsReward = 500, gemReward = 20, diamondReward = 2, isClaimed = false),
-            DailyBonusDay(5, "1,000 Sats + 30 Gems", satsReward = 1000, gemReward = 30, diamondReward = 5, isClaimed = false),
-            DailyBonusDay(6, "2,500 Sats + 50 Gems", satsReward = 2500, gemReward = 50, diamondReward = 8, isClaimed = false),
-            DailyBonusDay(7, "10,000 Sats + 20 Diamonds", satsReward = 10000, gemReward = 100, diamondReward = 20, isClaimed = false)
-        )
+        val defaultDailyBonuses = DailyBonusRepository.REWARD_SCHEDULE
 
         val defaultTasks = listOf(
             GameTask("task_tap_50", "Rock Crusher I", "Tap the central gold pile 50 times", 200, 10, 50, 0),
@@ -394,7 +413,8 @@ class GameViewModel(
             shopItems = defaultShopItems,
             dailyBonuses = defaultDailyBonuses,
             tasks = defaultTasks,
-            transactions = defaultTransactions
+            transactions = defaultTransactions,
+            productivity7Days = GameRepository.buildLast7DaysSeries(emptyList(), todayCurrentHashRateGh = 5.0)
         )
 
         // Asynchronously load Room persisted state
@@ -439,6 +459,16 @@ class GameViewModel(
                 )
             }
             recalculateHashRate()
+            if (offlineBtcMined > 0.0) {
+                addProductivityDelta(addedSats = offlineBtcMined * 100_000_000.0, addedTaps = 0)
+                flushDailyProductivityToRoom()
+            } else {
+                refreshProductivityUiState()
+            }
+            isInitialStateLoaded = true
+
+            // Automatically check & award 24-hour random crypto Daily Bonus on app open
+            evaluateDailyBonusOnOpenInternal()
 
             // Observe active hash rate updates from Room
             repository.activeHashRateFlow?.collect { dbHashRate ->
@@ -447,6 +477,153 @@ class GameViewModel(
                 }
             }
         }
+    }
+
+    private fun observeProductivitySync() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val initial = repository.getRecentProductivity(7)
+            synchronized(productivityLock) {
+                cachedProductivityRecords = initial
+            }
+            refreshProductivityUiState()
+
+            repository.recentProductivityFlow?.collect { records ->
+                synchronized(productivityLock) {
+                    cachedProductivityRecords = records
+                }
+                refreshProductivityUiState()
+            }
+        }
+    }
+
+    private fun addProductivityDelta(addedSats: Double, addedTaps: Int) {
+        synchronized(productivityLock) {
+            pendingProductivitySats += addedSats.coerceAtLeast(0.0)
+            pendingProductivityTaps += addedTaps.coerceAtLeast(0)
+        }
+        refreshProductivityUiState()
+    }
+
+    private fun refreshProductivityUiState() {
+        val series = synchronized(productivityLock) {
+            GameRepository.buildLast7DaysSeries(
+                records = cachedProductivityRecords,
+                todayPendingSats = pendingProductivitySats,
+                todayPendingTaps = pendingProductivityTaps,
+                todayCurrentHashRateGh = _uiState.value.totalHashRateGh
+            )
+        }
+        _uiState.update { it.copy(productivity7Days = series) }
+    }
+
+    private suspend fun flushDailyProductivityToRoom() {
+        val (satsDelta, tapsDelta) = synchronized(productivityLock) {
+            val s = pendingProductivitySats
+            val t = pendingProductivityTaps
+            pendingProductivitySats = 0.0
+            pendingProductivityTaps = 0
+            s to t
+        }
+        val currentHash = _uiState.value.totalHashRateGh
+        if (satsDelta > 0.0 || tapsDelta > 0 || currentHash > 0.0) {
+            repository.recordDailyProductivity(
+                dateKey = GameRepository.dateKeyFor(),
+                addedSats = satsDelta,
+                addedTaps = tapsDelta,
+                currentHashRateGh = currentHash
+            )
+        }
+    }
+
+    private fun observeDailyBonusSync() {
+        viewModelScope.launch(Dispatchers.IO) {
+            dailyBonusRepository.getOrInitCheckIn()
+            dailyBonusRepository.checkInFlow.collect { checkIn ->
+                if (checkIn != null) {
+                    val now = System.currentTimeMillis()
+                    val canClaim = dailyBonusRepository.canClaim(checkIn.lastClaimTimestamp, now)
+                    val claimedTargetDay = if (checkIn.currentStreakDay <= 1) 7 else checkIn.currentStreakDay - 1
+                    val syncedDays = DailyBonusRepository.REWARD_SCHEDULE.map { scheduleDay ->
+                        val isClaimed = if (canClaim) {
+                            scheduleDay.day < checkIn.currentStreakDay
+                        } else {
+                            if (checkIn.currentStreakDay == 1 && checkIn.lastClaimTimestamp > 0L) {
+                                true
+                            } else {
+                                scheduleDay.day <= claimedTargetDay
+                            }
+                        }
+                        val isCurrent = if (canClaim) {
+                            scheduleDay.day == checkIn.currentStreakDay
+                        } else {
+                            false
+                        }
+                        scheduleDay.copy(isClaimed = isClaimed, isCurrent = isCurrent)
+                    }
+                    _uiState.update { it.copy(dailyBonuses = syncedDays) }
+                }
+            }
+        }
+    }
+
+    fun checkAndAwardDailyBonusOnOpen() {
+        if (!isInitialStateLoaded) return
+        viewModelScope.launch(Dispatchers.IO) {
+            evaluateDailyBonusOnOpenInternal()
+        }
+    }
+
+    private suspend fun evaluateDailyBonusOnOpenInternal() {
+        dailyBonusMutex.withLock {
+            if (!isInitialStateLoaded) return
+            when (val result = dailyBonusRepository.claimDailyBonus(applyToUserStats = false)) {
+                is ClaimResult.Success -> {
+                    val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                    val tx = WalletTransaction(
+                        id = "tx_daily_${System.currentTimeMillis()}",
+                        title = "Daily Random Crypto Bonus (Day ${result.streakDayClaimed})",
+                        amountBtc = result.awardedBtc,
+                        amountSats = result.awardedSats,
+                        timeAgo = timeStr,
+                        isPositive = true
+                    )
+                    val event = DailyBonusAwardEvent(
+                        streakDay = result.streakDayClaimed,
+                        awardedSats = result.awardedSats,
+                        awardedBtc = result.awardedBtc,
+                        awardedGems = result.awardedGems,
+                        awardedDiamonds = result.awardedDiamonds
+                    )
+                    _uiState.update { state ->
+                        state.copy(
+                            btcBalance = state.btcBalance + result.awardedBtc,
+                            pinkGems = state.pinkGems + result.awardedGems,
+                            blueDiamonds = state.blueDiamonds + result.awardedDiamonds,
+                            transactions = listOf(tx) + state.transactions,
+                            dailyBonusAwardPopup = event,
+                            bannerNotice = result.message
+                        )
+                    }
+                    soundController.playRewardChime()
+                    val s = _uiState.value
+                    repository.updateBalances(
+                        btcBalance = s.btcBalance,
+                        pinkGems = s.pinkGems,
+                        blueDiamonds = s.blueDiamonds,
+                        activeMinerCount = s.activeMinerCount,
+                        totalHashRateGh = s.totalHashRateGh,
+                        totalTaps = s.totalTaps
+                    )
+                }
+                is ClaimResult.Failure -> {
+                    // 24h cooldown still active; no bonus awarded
+                }
+            }
+        }
+    }
+
+    fun dismissDailyBonusPopup() {
+        _uiState.update { it.copy(dailyBonusAwardPopup = null) }
     }
 
     /**
@@ -526,9 +703,10 @@ class GameViewModel(
                     else -> 1.0f
                 }
 
+                val tickBtcAdded = btcIncrement + extraAutoTapBtc + blockRewardBtc
                 _uiState.update { state ->
                     state.copy(
-                        btcBalance = state.btcBalance + btcIncrement + extraAutoTapBtc + blockRewardBtc,
+                        btcBalance = state.btcBalance + tickBtcAdded,
                         boostMultiplier = currentMultiplier,
                         boostRemainingSeconds = newBoostRemaining,
                         autoTapActive = newAutoTapRemaining > 0,
@@ -544,6 +722,14 @@ class GameViewModel(
                     )
                 }
 
+                // Accumulate passive & block BTC output into today's productivity metrics
+                synchronized(productivityLock) {
+                    pendingProductivitySats += tickBtcAdded * 100_000_000.0
+                }
+                if (tickCount % 10 == 0) {
+                    refreshProductivityUiState()
+                }
+
                 // Periodically update the Bitcoin balance in the Room database every 10 ticks (1 second)
                 if (tickCount % 10 == 0) {
                     val currentBtc = _uiState.value.btcBalance
@@ -557,7 +743,7 @@ class GameViewModel(
                     recalculateHashRate()
                 }
 
-                // Periodically persist full state to Room Database every 30 ticks (3 seconds)
+                // Periodically persist full state & daily productivity to Room Database every 30 ticks (3 seconds)
                 if (tickCount % 30 == 0) {
                     val s = _uiState.value
                     launch(Dispatchers.IO) {
@@ -569,6 +755,7 @@ class GameViewModel(
                             totalHashRateGh = s.totalHashRateGh,
                             totalTaps = s.totalTaps
                         )
+                        flushDailyProductivityToRoom()
                     }
                 }
             }
@@ -609,6 +796,9 @@ class GameViewModel(
         val effectiveTapSats = (tapSats * comboMult).toLong().coerceAtLeast(1L)
         val tapBtc = effectiveTapSats * 0.00000001
 
+        if (_uiState.value.soundEnabled) {
+            soundController.playMineTap(comboCount = _uiState.value.tapCombo)
+        }
         if (_uiState.value.hapticsEnabled) {
             triggerHaptic()
         }
@@ -620,6 +810,7 @@ class GameViewModel(
             text = "+${String.format(Locale.US, "%.8f", tapBtc)} BTC"
         )
 
+        var minedBlockOnTap = false
         _uiState.update { state ->
             val newTotalTaps = state.totalTaps + 1
             val updatedTasks = state.tasks.map { task ->
@@ -641,6 +832,7 @@ class GameViewModel(
                 newProgress = 0f
                 newBlockNum += 1
                 bonusBtc = 0.00000050
+                minedBlockOnTap = true
                 notice = "🎉 Block #$newBlockNum Mined! +50 Sats Block Reward!"
             }
 
@@ -664,6 +856,13 @@ class GameViewModel(
                 comboMultiplier = newComboMultiplier,
                 bannerNotice = notice
             )
+        }
+
+        val tapYieldSats = effectiveTapSats.toDouble() + if (minedBlockOnTap) 50.0 else 0.0
+        addProductivityDelta(addedSats = tapYieldSats, addedTaps = 1)
+
+        if (minedBlockOnTap) {
+            soundController.playRewardChime()
         }
 
         // Persist immediately on tap milestones
@@ -748,6 +947,7 @@ class GameViewModel(
                 bannerNotice = "📺 Ad Reward! Earned +$amount Pink Gems!"
             )
         }
+        soundController.playRewardChime()
         persistStateToRoom()
     }
 
@@ -760,6 +960,7 @@ class GameViewModel(
                 bannerNotice = "📺 Ad Reward! 2x Mining Speed Boost active for ${seconds / 60} minutes!"
             )
         }
+        soundController.playUpgradeComplete()
         persistStateToRoom()
     }
 
@@ -773,6 +974,7 @@ class GameViewModel(
             val btcCost = costSats * 0.00000001
 
             if (state.btcBalance < btcCost && state.pinkGems < costGems) {
+                soundController.playError()
                 _uiState.update { it.copy(bannerNotice = "❌ Not enough balance or gems to hire ${miner.name}!") }
                 return
             }
@@ -801,6 +1003,7 @@ class GameViewModel(
                 bannerNotice = "⛏️ ${miner.name} is now mining at ${miner.hashRateGh.toInt()} GH/s!"
             )
         }
+        soundController.playUpgradeComplete()
         recalculateHashRate()
 
         // Persist miners and state to Room
@@ -817,14 +1020,17 @@ class GameViewModel(
 
         val btcCost = item.costSats * 0.00000001
         if (item.costSats > 0 && state.btcBalance < btcCost) {
+            soundController.playError()
             _uiState.update { it.copy(bannerNotice = "❌ Not enough BTC to purchase ${item.name}!") }
             return
         }
         if (item.costGems > 0 && state.pinkGems < item.costGems) {
+            soundController.playError()
             _uiState.update { it.copy(bannerNotice = "❌ Not enough Pink Gems to purchase ${item.name}!") }
             return
         }
         if (item.costDiamonds > 0 && state.blueDiamonds < item.costDiamonds) {
+            soundController.playError()
             _uiState.update { it.copy(bannerNotice = "❌ Not enough Blue Diamonds to purchase ${item.name}!") }
             return
         }
@@ -867,31 +1073,12 @@ class GameViewModel(
                 }
             }
         }
+        soundController.playUpgradeComplete()
         persistStateToRoom()
     }
 
-    fun claimDailyBonus(dayNumber: Int) {
-        val bonus = _uiState.value.dailyBonuses.find { it.day == dayNumber } ?: return
-        if (bonus.isClaimed || !bonus.isCurrent) return
-
-        val btcReward = bonus.satsReward * 0.00000001
-        _uiState.update { state ->
-            val updatedBonuses = state.dailyBonuses.mapIndexed { idx, day ->
-                when {
-                    day.day == dayNumber -> day.copy(isClaimed = true, isCurrent = false)
-                    day.day == dayNumber + 1 -> day.copy(isCurrent = true)
-                    else -> day
-                }
-            }
-            state.copy(
-                btcBalance = state.btcBalance + btcReward,
-                pinkGems = state.pinkGems + bonus.gemReward,
-                blueDiamonds = state.blueDiamonds + bonus.diamondReward,
-                dailyBonuses = updatedBonuses,
-                bannerNotice = "🎁 Day $dayNumber Claimed! +${bonus.satsReward} Sats, +${bonus.gemReward} Gems, +${bonus.diamondReward} Diamonds!"
-            )
-        }
-        persistStateToRoom()
+    fun claimDailyBonus(@Suppress("UNUSED_PARAMETER") dayNumber: Int = 1) {
+        checkAndAwardDailyBonusOnOpen()
     }
 
     fun claimTaskReward(taskId: String) {
@@ -910,12 +1097,19 @@ class GameViewModel(
                 bannerNotice = "🏆 Task Completed! +${task.rewardSats} Sats, +${task.rewardGems} Gems!"
             )
         }
+        soundController.playRewardChime()
         persistStateToRoom()
     }
 
     fun simulateWithdrawal(amountBtc: Double, address: String): Boolean {
-        if (amountBtc <= 0 || amountBtc > _uiState.value.btcBalance) return false
-        if (address.isBlank() || address.length < 8) return false
+        if (amountBtc <= 0 || amountBtc > _uiState.value.btcBalance) {
+            soundController.playError()
+            return false
+        }
+        if (address.isBlank() || address.length < 8) {
+            soundController.playError()
+            return false
+        }
 
         val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
         val tx = WalletTransaction(
@@ -934,6 +1128,7 @@ class GameViewModel(
                 bannerNotice = "🚀 Withdrawal of ${String.format(Locale.US, "%.8f", amountBtc)} BTC dispatched to blockchain!"
             )
         }
+        soundController.playUpgradeComplete()
         persistStateToRoom()
         return true
     }
@@ -941,6 +1136,10 @@ class GameViewModel(
     fun toggleSound() {
         val newSound = !_uiState.value.soundEnabled
         prefs.soundEnabled = newSound
+        soundController.setEnabled(newSound)
+        if (newSound) {
+            soundController.playUiTick()
+        }
         _uiState.update { it.copy(soundEnabled = newSound) }
     }
 
@@ -952,6 +1151,7 @@ class GameViewModel(
 
     fun resetGame() {
         prefs.resetAll()
+        isInitialStateLoaded = false
         viewModelScope.launch(Dispatchers.IO) {
             val defaultMiners = listOf(
                 Miner(
@@ -983,9 +1183,23 @@ class GameViewModel(
                 lastSavedTimestamp = System.currentTimeMillis()
             )
             repository.resetDatabase(defaultState, defaultMiners.map { it.toEntity() })
+            dailyBonusRepository.resetCheckIn()
+            loadInitialState()
         }
-        loadInitialState()
-        _uiState.update { it.copy(bannerNotice = "🔄 Game reset to beginning!") }
+        soundController.setEnabled(true)
+        synchronized(productivityLock) {
+            cachedProductivityRecords = emptyList()
+            pendingProductivitySats = 0.0
+            pendingProductivityTaps = 0
+        }
+        _uiState.update {
+            it.copy(
+                soundEnabled = true,
+                dailyBonusAwardPopup = null,
+                productivity7Days = GameRepository.buildLast7DaysSeries(emptyList(), todayCurrentHashRateGh = 5.0),
+                bannerNotice = "🔄 Game reset to beginning!"
+            )
+        }
     }
 
     companion object {
@@ -993,9 +1207,14 @@ class GameViewModel(
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {
                 val application = checkNotNull(extras[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY])
-                val repository = (application as? CryptoMinerApplication)?.appContainer?.gameRepository
+                val app = application as? CryptoMinerApplication
+                val repository = app?.appContainer?.gameRepository
                     ?: DatabaseModule.provideGameRepository(application)
-                return GameViewModel(application, repository) as T
+                val dailyBonusRepository = app?.appContainer?.dailyBonusRepository
+                    ?: DatabaseModule.provideDailyBonusRepository(application)
+                val soundController = app?.appContainer?.soundManager
+                    ?: SoundManager(application, GamePreferences(application).soundEnabled)
+                return GameViewModel(application, repository, dailyBonusRepository, soundController) as T
             }
         }
     }

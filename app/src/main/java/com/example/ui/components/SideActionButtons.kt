@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.LocalOffer
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shield
@@ -215,6 +216,7 @@ fun RightSideActions(
     vipLevel: Int,
     onVipClick: () -> Unit,
     onSubscribeClick: () -> Unit,
+    onLeaderboardClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -273,6 +275,18 @@ fun RightSideActions(
             accentColor = Color(0xFFFF9800),
             testTag = "btn_subscribe",
             onClick = onSubscribeClick
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        SideActionItem(
+            title = "Top\nMiners",
+            icon = Icons.Default.EmojiEvents,
+            accentColor = GoldPrimary,
+            testTag = "btn_leaderboard",
+            badgeText = "LIVE",
+            pulseAnimation = true,
+            onClick = onLeaderboardClick
         )
     }
 }

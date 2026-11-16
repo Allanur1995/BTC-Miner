@@ -18,8 +18,13 @@ interface DailyCheckInDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdateCheckIn(checkIn: DailyCheckInEntity)
 
-    @Query("UPDATE daily_check_in SET current_streak_day = :streak, last_claim_timestamp = :timestamp, total_claims_count = total_claims_count + 1 WHERE id = 1")
-    suspend fun recordClaim(streak: Int, timestamp: Long)
+    @Query(
+        "UPDATE daily_check_in SET current_streak_day = :streak, last_claim_timestamp = :timestamp, " +
+            "total_claims_count = total_claims_count + 1, " +
+            "last_awarded_sats = :sats, last_awarded_gems = :gems, last_awarded_diamonds = :diamonds " +
+            "WHERE id = 1"
+    )
+    suspend fun recordClaim(streak: Int, timestamp: Long, sats: Long, gems: Int, diamonds: Int)
 
     @Query("DELETE FROM daily_check_in")
     suspend fun clearCheckIn()

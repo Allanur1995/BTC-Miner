@@ -1,0 +1,63 @@
+{
+  "entities": {
+    "LeaderboardEntry": {
+      "title": "LeaderboardEntry",
+      "description": "Public miner ranking entry ordered by total crypto mined.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Authentication UID of the player."
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Public player display name shown on the global leaderboard."
+        },
+        "totalSatsMined": {
+          "type": "integer",
+          "description": "Total Satoshis mined by the player."
+        },
+        "totalBtcMined": {
+          "type": "number",
+          "description": "Total Bitcoin balance/mined amount for display."
+        },
+        "hashRateGh": {
+          "type": "number",
+          "description": "Current passive mining speed in GH/s."
+        },
+        "activeMiners": {
+          "type": "integer",
+          "description": "Number of currently active miners."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the player first joined the leaderboard."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the latest score sync."
+        }
+      },
+      "required": [
+        "userId",
+        "displayName",
+        "totalSatsMined",
+        "totalBtcMined",
+        "hashRateGh",
+        "activeMiners",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/leaderboard/{userId}": {
+      "schema": {
+        "$ref": "#/entities/LeaderboardEntry"
+      },
+      "description": "Global leaderboard rankings indexed by player UID, ordered descending by totalSatsMined."
+    }
+  }
+}

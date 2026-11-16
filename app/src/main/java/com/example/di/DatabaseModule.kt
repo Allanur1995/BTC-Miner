@@ -46,6 +46,13 @@ object DatabaseModule {
     }
 
     /**
+     * Provides the DailyProductivityDao from the provided AppDatabase.
+     */
+    fun provideDailyProductivityDao(database: AppDatabase): com.example.data.local.DailyProductivityDao {
+        return database.dailyProductivityDao()
+    }
+
+    /**
      * Provides the DailyBonusRepository backed by DailyCheckInDao and UserStatsDao.
      */
     fun provideDailyBonusRepository(context: Context): com.example.data.repository.DailyBonusRepository {
@@ -56,12 +63,13 @@ object DatabaseModule {
     }
 
     /**
-     * Provides the GameRepository backed by GameStateDao and UserStatsDao.
+     * Provides the GameRepository backed by GameStateDao, UserStatsDao, and DailyProductivityDao.
      */
     fun provideGameRepository(context: Context): GameRepository {
         val database = provideDatabase(context)
         val gameStateDao = provideGameStateDao(database)
         val userStatsDao = provideUserStatsDao(database)
-        return GameRepository(gameStateDao, userStatsDao)
+        val dailyProductivityDao = provideDailyProductivityDao(database)
+        return GameRepository(gameStateDao, userStatsDao, dailyProductivityDao)
     }
 }

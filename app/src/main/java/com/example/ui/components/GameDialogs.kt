@@ -15,10 +15,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeMute
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.RestartAlt
-import androidx.compose.material.icons.filled.VolumeMute
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.ads.AdMobConfig
+import com.example.model.DailyBonusAwardEvent
 import com.example.ui.theme.CaveCardBg
 import com.example.ui.theme.GoldDark
 import com.example.ui.theme.GoldLight
@@ -52,6 +53,7 @@ import com.example.ui.theme.PurpleLilith
 import com.example.ui.theme.WoodBrown
 import com.example.ui.theme.WoodBrownDark
 import com.example.viewmodel.GameDialogType
+import java.util.Locale
 
 @Composable
 fun DialogWrapper(
@@ -125,17 +127,25 @@ fun SettingsDialog(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        imageVector = if (soundEnabled) Icons.Default.VolumeUp else Icons.Default.VolumeMute,
+                        imageVector = if (soundEnabled) Icons.AutoMirrored.Filled.VolumeUp else Icons.AutoMirrored.Filled.VolumeMute,
                         contentDescription = "Sound",
                         tint = GoldPrimary
                     )
                     Spacer(modifier = Modifier.width(10.dp))
-                    Text(text = "Sound Effects", color = Color.White, fontWeight = FontWeight.Bold)
+                    Column {
+                        Text(text = "Sound Effects", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "Mining taps, upgrades & bonus chimes",
+                            color = Color(0xFF90A4AE),
+                            fontSize = 11.sp
+                        )
+                    }
                 }
                 Switch(
                     checked = soundEnabled,
                     onCheckedChange = { onToggleSound() },
-                    colors = SwitchDefaults.colors(checkedThumbColor = GoldPrimary)
+                    colors = SwitchDefaults.colors(checkedThumbColor = GoldPrimary),
+                    modifier = Modifier.testTag("switch_sound_effects")
                 )
             }
 
@@ -336,6 +346,133 @@ fun LilithEventDialog(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(text = "View in Miners Roster", color = Color.White, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+fun DailyBonusAwardedDialog(
+    event: DailyBonusAwardEvent,
+    onDismiss: () -> Unit
+) {
+    DialogWrapper(title = "🎁 Daily Crypto Bonus!", onDismiss = onDismiss) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("daily_bonus_awarded_dialog")
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(GoldLight.copy(alpha = 0.35f), Color(0xFF1A2234))
+                        )
+                    )
+                    .border(2.dp, GoldPrimary, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(text = "₿", color = GoldLight, fontSize = 36.sp, fontWeight = FontWeight.Black)
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Text(
+                text = "Day ${event.streakDay} Check-In Reward",
+                color = GoldLight,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Black
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = "Random crypto drop unlocked on app open!",
+                color = Color(0xFFB0BEC5),
+                fontSize = 12.sp,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFF121826))
+                    .border(1.dp, GoldPrimary.copy(alpha = 0.6f), RoundedCornerShape(14.dp))
+                    .padding(14.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "+${event.awardedSats} Satoshis",
+                        color = GoldPrimary,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                    Text(
+                        text = "+${String.format(Locale.US, "%.8f", event.awardedBtc)} BTC",
+                        color = GreenHashRate,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (event.awardedGems > 0 || event.awardedDiamonds > 0) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (event.awardedGems > 0) {
+                                Text(
+                                    text = "💎 +${event.awardedGems} Gems",
+                                    color = PinkGem,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            if (event.awardedDiamonds > 0) {
+                                Text(
+                                    text = "🔷 +${event.awardedDiamonds} Diamonds",
+                                    color = Color(0xFF4FC3F7),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Text(
+                text = "Credited to your Wallet • Next bonus in 24h",
+                color = Color(0xFF90A4AE),
+                fontSize = 11.sp,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("btn_collect_daily_bonus")
+            ) {
+                Text(
+                    text = "COLLECT & MINE!",
+                    color = Color.Black,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 14.sp
+                )
             }
         }
     }

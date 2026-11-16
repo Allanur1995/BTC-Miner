@@ -171,6 +171,7 @@ fun MineScreen(
                     vipLevel = uiState.vipLevel,
                     onVipClick = { onOpenDialog(GameDialogType.VIP_STATUS) },
                     onSubscribeClick = { onOpenDialog(GameDialogType.SUBSCRIBE) },
+                    onLeaderboardClick = { onTabSelected(CurrentScreen.LEADERBOARD) },
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(end = 6.dp, top = 8.dp)
