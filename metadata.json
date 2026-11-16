@@ -1,0 +1,6 @@
+{
+  "name": "BTC Miner",
+  "description": "Idle crypto mining simulation game with gold clicker, miner recruitment, hash rate upgrades, daily bonuses, and crypto wallet.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
